@@ -1,0 +1,402 @@
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /Users/giulioconte/Desktop/BSE/thesis/SOEP/7z2600-mac/did-minwage-staggered/output/log_analysis.log
+  log type:  text
+ opened on:  31 Mar 2026, 16:05:25
+
+. 
+. ********************************************************************************
+. * 0. INSTALL PACKAGES
+. ********************************************************************************
+. 
+. foreach pkg in did_multiplegt_dyn estout bacondecomp {
+  2.     cap which `pkg'
+  3.     if _rc != 0 {
+  4.         ssc install `pkg', replace
+  5.     }
+  6. }
+
+. 
+. ********************************************************************************
+. * 1. LOAD AND PREPARE DATA
+. ********************************************************************************
+. 
+. import delimited "data/raw/mpdta.csv", clear
+(encoding automatically selected: ISO-8859-1)
+(6 vars, 2,500 obs)
+
+. 
+. * Fix variable names
+. rename countyreal county_id
+
+. rename firsttreat first_treat
+
+. rename lemp       log_emp
+
+. rename lpop       log_pop
+
+. 
+. label var county_id   "County FIPS code"
+
+. label var year        "Year"
+
+. label var log_emp     "Log county employment (outcome)"
+
+. label var log_pop     "Log county population (control)"
+
+. label var first_treat "Year of first treatment (0 = never treated)"
+
+. 
+. * Reconstruct treat as a clean absorbing indicator
+. * (original treat variable may have inconsistencies)
+. drop treat
+
+. gen treat = (first_treat > 0 & year >= first_treat)
+
+. label var treat "=1 if county is treated in this year (absorbing)"
+
+. 
+. * Never-treated indicator
+. gen never_treated = (first_treat == 0)
+
+. label var never_treated "=1 if county never treated"
+
+. 
+. * Treatment cohort
+. gen cohort = first_treat
+
+. label define cohort_lbl 0 "Never Treated" 2004 "Cohort 2004" ///
+>                          2006 "Cohort 2006" 2007 "Cohort 2007"
+
+. label values cohort cohort_lbl
+
+. 
+. * Set panel
+. xtset county_id year
+
+Panel variable: county_id (strongly balanced)
+ Time variable: year, 2003 to 2007
+         Delta: 1 unit
+
+. 
+. * Verify treat is monotonically increasing (required for bacondecomp)
+. bysort county_id (year): assert treat >= treat[_n-1] if _n > 1
+
+. di "Treatment variable is monotonically non-decreasing: OK"
+Treatment variable is monotonically non-decreasing: OK
+
+. 
+. save "data/minwage_clean.dta", replace
+file data/minwage_clean.dta saved
+
+. 
+. ********************************************************************************
+. * 2. DESCRIPTIVE STATISTICS
+. ********************************************************************************
+. 
+. use "data/minwage_clean.dta", clear
+
+. 
+. * Sample composition
+. tab cohort
+
+       cohort |      Freq.     Percent        Cum.
+--------------+-----------------------------------
+Never Treated |      1,545       61.80       61.80
+  Cohort 2004 |        100        4.00       65.80
+  Cohort 2006 |        200        8.00       73.80
+  Cohort 2007 |        655       26.20      100.00
+--------------+-----------------------------------
+        Total |      2,500      100.00
+
+. 
+. * Summary statistics
+. estpost tabstat log_emp log_pop, ///
+>     by(cohort) statistics(mean sd n) columns(statistics)
+
+Summary statistics: mean sd count
+     for variables: log_emp log_pop
+  by categories of: cohort
+
+      cohort |   e(mean)      e(sd)   e(count) 
+-------------+---------------------------------
+Never Trea~d |                                 
+     log_emp |  5.630293   1.500404       1545 
+     log_pop |  3.183434   1.285763       1545 
+-------------+---------------------------------
+Cohort 2004  |                                 
+     log_emp |  6.091561   1.496684        100 
+     log_pop |  3.476397   1.282299        100 
+-------------+---------------------------------
+Cohort 2006  |                                 
+     log_emp |  6.544059   1.276576        200 
+     log_pop |  3.754087   1.155531        200 
+-------------+---------------------------------
+Cohort 2007  |                                 
+     log_emp |  5.823694   1.516795        655 
+     log_pop |  3.458641    1.26142        655 
+-------------+---------------------------------
+Total        |                                 
+     log_emp |  5.772516   1.508781       2500 
+     log_pop |  3.312909    1.28136       2500 
+
+. 
+. esttab using "output/table_summary.csv", replace ///
+>     cells("mean(fmt(3)) sd(fmt(3)) count(fmt(0))") ///
+>     title("Summary Statistics by Treatment Cohort") noobs
+(output written to output/table_summary.csv)
+
+. 
+. * Trends by cohort
+. preserve
+
+. collapse (mean) log_emp, by(year cohort)
+
+. 
+. twoway ///
+>     (line log_emp year if cohort == 0,    lcolor(navy)         lwidth(medium)) ///
+>     (line log_emp year if cohort == 2004, lcolor(cranberry)    lwidth(medium) lpattern(dash)) ///
+>     (line log_emp year if cohort == 2006, lcolor(forest_green) lwidth(medium) lpattern(dot)) ///
+>     (line log_emp year if cohort == 2007, lcolor(orange)       lwidth(medium) lpattern(longdash)), ///
+>     legend(label(1 "Never Treated") label(2 "Cohort 2004") ///
+>            label(3 "Cohort 2006")   label(4 "Cohort 2007") rows(2) size(small)) ///
+>     xtitle("Year") ytitle("Mean Log Employment") ///
+>     title("Employment Trends by Treatment Cohort") ///
+>     xline(2004, lcolor(cranberry)    lpattern(shortdash) lwidth(thin)) ///
+>     xline(2006, lcolor(forest_green) lpattern(shortdash) lwidth(thin)) ///
+>     xline(2007, lcolor(orange)       lpattern(shortdash) lwidth(thin)) ///
+>     note("Source: Callaway & Sant'Anna (2021) — mpdta")
+
+. 
+. graph export "output/figures/trends_by_cohort.png", replace width(1400)
+file /Users/giulioconte/Desktop/BSE/thesis/SOEP/7z2600-mac/did-minwage-staggered/output/figures/trends_by_cohort.png saved as PNG format
+
+. restore
+
+. 
+. ********************************************************************************
+. * 3. TWFE DiD (BASELINE)
+. ********************************************************************************
+. 
+. use "data/minwage_clean.dta", clear
+
+. 
+. xtreg log_emp treat i.year, fe vce(cluster county_id)
+
+Fixed-effects (within) regression               Number of obs     =      2,500
+Group variable: county_id                       Number of groups  =        500
+
+R-squared:                                      Obs per group:
+     Within  = 0.0315                                         min =          5
+     Between = 0.0177                                         avg =        5.0
+     Overall = 0.0006                                         max =          5
+
+                                                F(5, 499)         =      17.57
+corr(u_i, Xb) = -0.0403                         Prob > F          =     0.0000
+
+                            (Std. err. adjusted for 500 clusters in county_id)
+------------------------------------------------------------------------------
+             |               Robust
+     log_emp | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+       treat |  -.0365489   .0132652    -2.76   0.006    -.0626114   -.0104865
+             |
+        year |
+       2004  |  -.0530738   .0070782    -7.50   0.000    -.0669805   -.0391671
+       2005  |  -.0435965   .0082349    -5.29   0.000    -.0597758   -.0274171
+       2006  |  -.0177705   .0111619    -1.59   0.112    -.0397006    .0041596
+       2007  |   .0057428   .0127635     0.45   0.653    -.0193339    .0308196
+             |
+       _cons |    5.79851   .0063912   907.26   0.000     5.785953    5.811067
+-------------+----------------------------------------------------------------
+     sigma_u |  1.5056245
+     sigma_e |  .13905969
+         rho |  .99154176   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. estimates store twfe_basic
+
+. estadd local fe "County + Year"
+
+added macro:
+                 e(fe) : "County + Year"
+
+. estadd local control "No"
+
+added macro:
+            e(control) : "No"
+
+. 
+. xtreg log_emp treat log_pop i.year, fe vce(cluster county_id)
+note: log_pop omitted because of collinearity.
+
+Fixed-effects (within) regression               Number of obs     =      2,500
+Group variable: county_id                       Number of groups  =        500
+
+R-squared:                                      Obs per group:
+     Within  = 0.0315                                         min =          5
+     Between = 0.0177                                         avg =        5.0
+     Overall = 0.0006                                         max =          5
+
+                                                F(5, 499)         =      17.57
+corr(u_i, Xb) = -0.0403                         Prob > F          =     0.0000
+
+                            (Std. err. adjusted for 500 clusters in county_id)
+------------------------------------------------------------------------------
+             |               Robust
+     log_emp | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+       treat |  -.0365489   .0132652    -2.76   0.006    -.0626114   -.0104865
+     log_pop |          0  (omitted)
+             |
+        year |
+       2004  |  -.0530738   .0070782    -7.50   0.000    -.0669805   -.0391671
+       2005  |  -.0435965   .0082349    -5.29   0.000    -.0597758   -.0274171
+       2006  |  -.0177705   .0111619    -1.59   0.112    -.0397006    .0041596
+       2007  |   .0057428   .0127635     0.45   0.653    -.0193339    .0308196
+             |
+       _cons |    5.79851   .0063912   907.26   0.000     5.785953    5.811067
+-------------+----------------------------------------------------------------
+     sigma_u |  1.5056245
+     sigma_e |  .13905969
+         rho |  .99154176   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. estimates store twfe_controls
+
+. estadd local fe "County + Year"
+
+added macro:
+                 e(fe) : "County + Year"
+
+. estadd local control "Yes"
+
+added macro:
+            e(control) : "Yes"
+
+. 
+. esttab twfe_basic twfe_controls using "output/table_twfe.csv", replace ///
+>     keep(treat) ///
+>     cells(b(star fmt(4)) se(par fmt(4))) ///
+>     starlevels(* 0.10 ** 0.05 *** 0.01) ///
+>     stats(fe control N, labels("Fixed Effects" "Pop. Control" "Observations")) ///
+>     title("TWFE DiD: Effect of Minimum Wage on Log Employment") ///
+>     mtitles("Basic TWFE" "With Controls") ///
+>     note("SE clustered at county level.")
+(output written to output/table_twfe.csv)
+
+. 
+. ********************************************************************************
+. * 4. BACON DECOMPOSITION
+. ********************************************************************************
+. 
+. use "data/minwage_clean.dta", clear
+
+. xtset county_id year
+
+Panel variable: county_id (strongly balanced)
+ Time variable: year, 2003 to 2007
+         Delta: 1 unit
+
+. 
+. bacondecomp log_emp treat, ddetail
+Computing decomposition across 4 timing groups
+including a never-treated group
+------------------------------------------------------------------------------
+     log_emp | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+       treat |  -.0365489   .0126465    -2.89   0.004    -.0613355   -.0117623
+------------------------------------------------------------------------------
+
+Bacon Decomposition
+
++---------------------------------------------------+
+|                      |         Beta   TotalWeight |
+|----------------------+----------------------------|
+|         Early_v_Late | -.0456078239   .0052931759 |
+|         Late_v_Early |  .0542869382   .0105863517 |
+|         Early_v_Late | -.0910553485   .0260027271 |
+|         Late_v_Early | -.0196047239   .0260027271 |
+|         Early_v_Late |  .0184803568   .0520054542 |
+|         Late_v_Early |  .0105754631   .0173351506 |
+|       Never_v_timing | -.0407396755   .8627744133 |
++---------------------------------------------------+
+
+. 
+. graph export "output/figures/bacon_decomp.png", replace width(1200)
+file /Users/giulioconte/Desktop/BSE/thesis/SOEP/7z2600-mac/did-minwage-staggered/output/figures/bacon_decomp.png saved as PNG format
+
+. 
+. ********************************************************************************
+. * 5. DID_MULTIPLEGT_DYN (de Chaisemartin & D'Haultfoeuille, 2024)
+. ********************************************************************************
+. 
+. use "data/minwage_clean.dta", clear
+
+. 
+. did_multiplegt_dyn log_emp county_id year treat, ///
+>     effects(4) placebo(3)                        ///
+>     controls(log_pop)                            ///
+>     cluster(county_id)
+Some control variables are not taken into account for groups with baseline treatment equal to: [0]
+This may occur in the following situations:
+1. For groups with those values of the baseline treatment, the regression of the outcome first difference on the controls' first differences and time fi
+> xed effects has fewer observations than variables. Note that for each value of the baseline treatment, those regressions are estimated among (g,t)s su
+> ch that g has not changed treatment yet at t.
+2. For groups with those values of the baseline treatment, two or more of your control variables are perfectly collinear in the sample where the regress
+> ion is run, for instance because those control variables do not vary over time.
+
+The number of placebos which can be estimated is at most 2. The command will therefore try to estimate 2 placebo(s).
+
+
+--------------------------------------------------------------------------------
+             Estimation of treatment effects: Event-study effects
+--------------------------------------------------------------------------------
+
+             |  Estimate         SE      LB CI      UB CI          N  Switchers 
+-------------+-----------------------------------------------------------------
+    Effect_1 | -.0189222   .0120677  -.0425744     .00473       1420        191 
+    Effect_2 | -.0535893   .0170398  -.0869868  -.0201919        849         60 
+    Effect_3 | -.1362743   .0362264  -.2072767  -.0652719        460         20 
+    Effect_4 | -.1008114   .0351004  -.1696069  -.0320158        329         20 
+--------------------------------------------------------------------------------
+Test of joint nullity of the effects : p-value = .00252615
+
+
+--------------------------------------------------------------------------------
+               Average cumulative (total) effect per treatment unit
+--------------------------------------------------------------------------------
+
+             |  Estimate         SE      LB CI      UB CI          N     Switch  x Periods 
+-------------+----------------------------------------------------------------------------
+  Av_tot_eff | -.0397636   .0118263  -.0629427  -.0165846       2000        291            
+--------------------------------------------------------------------------------
+Average number of time periods over which a treatment's effect is accumulated = 1.5498282
+
+
+--------------------------------------------------------------------------------
+          Testing the parallel trends and no anticipation assumptions
+--------------------------------------------------------------------------------
+
+             |  Estimate         SE      LB CI      UB CI          N  Switchers 
+-------------+-----------------------------------------------------------------
+   Placebo_1 |  .0242689   .0144872  -.0041255   .0526632        920        171 
+   Placebo_2 | -.0037693   .0317032  -.0659063   .0583678        349         40 
+--------------------------------------------------------------------------------
+Test of joint nullity of the placebos : p-value = .2231253
+
+
+The development of this package was funded by the European Union (ERC, REALLYCREDIBLE,GA N°101043899).
+
+. 
+. graph export "output/figures/event_study.png", replace width(1400)
+file /Users/giulioconte/Desktop/BSE/thesis/SOEP/7z2600-mac/did-minwage-staggered/output/figures/event_study.png saved as PNG format
+
+. 
+. ********************************************************************************
+. log close
+      name:  <unnamed>
+       log:  /Users/giulioconte/Desktop/BSE/thesis/SOEP/7z2600-mac/did-minwage-staggered/output/log_analysis.log
+  log type:  text
+ closed on:  31 Mar 2026, 16:05:28
+--------------------------------------------------------------------------------------------------------------------------------------------------------
